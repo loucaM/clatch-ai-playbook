@@ -34,7 +34,8 @@ Utilisation :
   ligne au changelog en bas du fichier.
 - Placeholders remplis par l'Edge Function avant l'appel : `{{sport_slug}}`,
   `{{difficulty}}`, `{{count}}`, `{{theme_directive}}` (thème imposé) et
-  `{{exclusion_block}}` (énoncés déjà en base sur le même thème, jusqu'à 120).
+  `{{exclusion_block}}` (énoncés déjà en base sur le même thème et la même difficulté,
+  jusqu'à 250).
 - Les règles éditoriales sont dans le prompt : ton, répartition hommes / femmes, propriété
   intellectuelle (marques, symboles olympiques), 7 à 10 mauvaises réponses dont 1 à 3
   plausibles, exclusion des paris sportifs et de la vie privée.
