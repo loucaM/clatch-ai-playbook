@@ -22,23 +22,36 @@ agents/    les 8 sous-agents Claude Code du pipeline quotidien
 | `question_gen_<sport>_v1.md` | un prompt par sport : athlétisme, basket, F1, rugby, tennis, vélo |
 | `question-v2.schema.json` | JSON Schema imposé au modèle |
 
-Utilisation :
+Utilisation (étiquettes = domaines de la certification Claude Certified Developer,
+Foundations) :
 
-- Appels à l'API Claude en HTTP direct depuis des Edge Functions Supabase. Opus pour la
-  rédaction des questions, Sonnet pour les tâches courtes. Batch API pour les traitements
-  différés. Structured Outputs sur `question-v2.schema.json` : la réponse du modèle est
+- **Applications & Integration** : appels à l'API Claude en HTTP direct depuis des Edge
+  Functions Supabase ; OpenAI pour les embeddings et la modération.
+- **Structured Output** : JSON Schema `question-v2.schema.json` imposé au modèle, réponse
   validée contre le schéma avant insertion en base.
-- Un prompt existe en trois exemplaires tenus synchrones : le fichier Markdown, une constante
-  de repli dans l'Edge Function, et la ligne active de la table `prompt_templates` (une par
-  sport, publiée par une RPC admin). Toute modification incrémente la version et ajoute une
-  ligne au changelog en bas du fichier.
-- Placeholders remplis par l'Edge Function avant l'appel : `{{sport_slug}}`,
-  `{{difficulty}}`, `{{count}}`, `{{theme_directive}}` (thème imposé) et
-  `{{exclusion_block}}` (énoncés déjà en base sur le même thème et la même difficulté,
-  jusqu'à 250).
+- **Model Selection & Optimization** : Opus pour la rédaction des questions, Sonnet pour les
+  tâches courtes ; Message Batches API pour les traitements différés (environ −70 % sur la
+  rédaction éditoriale par rapport à Opus en synchrone).
+- **Prompt & Context Engineering** : un prompt existe en trois exemplaires tenus synchrones,
+  le fichier Markdown, une constante de repli dans l'Edge Function, et la ligne active de la
+  table `prompt_templates` (une par sport, publiée par une RPC admin). Toute modification
+  incrémente la version et ajoute une ligne au changelog en bas du fichier. Placeholders
+  remplis avant l'appel : `{{sport_slug}}`, `{{difficulty}}`, `{{count}}`,
+  `{{theme_directive}}` (thème imposé) et `{{exclusion_block}}` (énoncés déjà en base sur le
+  même thème et la même difficulté, jusqu'à 250).
 - Les règles éditoriales sont dans le prompt : ton, répartition hommes / femmes, propriété
   intellectuelle (marques, symboles olympiques), 7 à 10 mauvaises réponses dont 1 à 3
   plausibles, exclusion des paris sportifs et de la vie privée.
+
+Retours d'expérience :
+
+- **Prompt & Context Engineering** : few-shot (une question modèle dans le prompt) plutôt
+  que règles vagues ; contexte borné à la tâche (250 énoncés ciblés, 500 caractères
+  d'instruction libre).
+- **Model Selection & Optimization** : extended thinking coupé sur les tâches courtes pour
+  tenir sous 30 secondes ; tout ce qui peut attendre passe en batch.
+- **Structured Output** : schéma + validation avant insertion, donc pas de parsing ni de champ
+  manquant.
 
 ## `agents/`
 
