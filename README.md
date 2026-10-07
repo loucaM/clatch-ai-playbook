@@ -65,15 +65,32 @@ d'orchestration les lance tous les matins à 08h00 (launchd, mode headless).
 
 Fonctionnement :
 
-- Entrées nommées dans le message de lancement (`date_veille`, `fenetre_app`, `budget`,
-  `deja_traites`), sortie JSON au format fixé dans le fichier.
-- Plafond de recherches web par agent : 14 pour la veille, 20 par lot de lecture. Minimum une
-  recherche : la mémoire du modèle n'est pas acceptée comme source.
-- Deux lecteurs par lot, lancés séparément ; aucun ne reçoit le classement de durabilité ni le
-  verdict de l'autre. Un désaccord donne `unsure`.
-- Un `unsure` n'est jamais appliqué automatiquement. Une erreur corrigeable donne `unsure` +
+- **Agents & Workflows** : pipeline orchestrator-workers, les 7 agents de veille en
+  parallèle, puis tri, génération, dédoublonnage, deux relecteurs indépendants, activation
+  automatique au-dessus du seuil, composition de la grille ; un contrôle par étape.
+- **Agents & Workflows** : relecteur = evaluator indépendant (LLM-as-judge), verdict
+  tri-état `approve` / `reject` / `unsure`, désaccord entre les deux relecteurs = `unsure`.
+  Un `unsure` n'est jamais appliqué automatiquement ; une erreur corrigeable donne `unsure` +
   correction, pas `reject`. L'activation automatique demande deux `approve`, une confiance
   ≥ 0,80 et deux sources ; le reste part en revue manuelle.
+- **Claude Code** : sous-agents déclarés en frontmatter (outils et modèle par agent), skills
+  métier pour l'orchestration, run headless `claude -p` quotidien lancé par launchd, liste
+  blanche d'outils, coût du run journalisé.
+- **Tools & MCPs** : MCP Supabase (SQL, migrations, Edge Functions), Sentry, context7,
+  codegraph ; l'Edge Function `dedup_check` est appelée comme un outil, son secret est lu
+  dans le Vault.
+
+Retours d'expérience :
+
+- **Agents & Workflows** : budgets durs de recherches par agent (14 en veille, 20 par lot de
+  relecture), comptés par l'agent, plancher à une recherche.
+- **Context Management & Reliability** : un agent = un contrat (entrées nommées
+  `date_veille`, `fenetre_app`, `budget`, `deja_traites` ; sortie JSON stricte) ; les
+  sous-agents rendent des faits, la session d'orchestration reste légère.
+- **Agents & Workflows** : relecteurs aveugles (ni le classement de durabilité, ni l'avis de
+  l'autre) ; un cas concret dans la fiche agent plutôt qu'une règle générale.
+- **Reliability** : contrôle de fin de run par le chemin du joueur, pas par les logs du
+  pipeline.
 
 Chaîne complète :
 
