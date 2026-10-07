@@ -1,91 +1,81 @@
 # CLATCH · prompts et agents
 
-Extraits du dépôt privé de **CLATCH**, quiz sportif en production sur iOS et Android
-(le Daily se joue sans compte : [clatch-app.com/daily](https://clatch-app.com/daily)).
+Extraits du dépôt privé de CLATCH, quiz sportif disponible sur iOS et Android. Le Daily se
+joue sans compte : [clatch-app.com/daily](https://clatch-app.com/daily).
 
-Le contenu de l'app est produit chaque matin par un pipeline LLM : des agents balaient
-l'actu de la veille, un modèle rédige les questions, d'autres agents les contre-vérifient,
-et seules celles qui passent le seuil de confiance sont activées. Ce dépôt publie les deux
-briques qui se lisent sans le code : les **prompts** et les **agents**.
+Les questions de l'app sont produites chaque matin par une chaîne automatisée : des agents
+relèvent l'actualité sportive de la veille, un modèle rédige les questions, deux lecteurs
+indépendants les vérifient, celles qui passent le seuil sont activées. Ce dépôt contient les
+prompts et les définitions d'agents de cette chaîne.
 
 ```
-prompts/   les prompts de génération de questions, versionnés, et leur JSON Schema
+prompts/   prompts de génération de questions, versionnés, et leur JSON Schema
 agents/    les 8 sous-agents Claude Code du pipeline quotidien
 ```
 
-## `prompts/` : génération de questions
+## `prompts/`
 
 | Fichier | Rôle |
 |---|---|
-| `question_gen_v3.md` | prompt foot courant : mono-thème imposé + bloc anti-répétition |
-| `question_gen_v2.md` | version précédente, conservée pour le changelog (v1.0 → v2.9) |
+| `question_gen_v3.md` | prompt foot en vigueur : thème imposé + liste d'exclusion |
+| `question_gen_v2.md` | version précédente, conservée avec son changelog (v1.0 → v2.9) |
 | `question_gen_<sport>_v1.md` | un prompt par sport : athlétisme, basket, F1, rugby, tennis, vélo |
-| `question-v2.schema.json` | le JSON Schema imposé au modèle en Structured Outputs |
+| `question-v2.schema.json` | JSON Schema imposé au modèle |
 
-Comment ils sont utilisés :
+Utilisation :
 
-- **Appel** : Claude (Opus pour les questions, Sonnet pour les tâches courtes) via la
-  **Batch API** pour tout ce qui n'est pas temps réel, en **Structured Outputs** sur le
-  schéma ci-dessus. La sortie est typée et validée avant d'entrer en base.
-- **Versionnés en trois endroits synchronisés** : le fichier Markdown (source de vérité
-  humaine), une constante de repli dans l'Edge Function, et la ligne active de la table
-  `prompt_templates` (une seule active par sport, publiée par une RPC admin). Un ajustement
-  = bump de version + ligne de changelog en bas du fichier.
-- **Placeholders remplis au runtime** par l'Edge Function : `{{sport_slug}}`,
-  `{{difficulty}}`, `{{count}}`, `{{theme_directive}}` (thème unique imposé) et
-  `{{exclusion_block}}` (jusqu'à 120 énoncés déjà en base, pour ne pas se répéter).
-- **Doctrine éditoriale dans le prompt** : ton chambreur, politique H/F, propriété
-  intellectuelle (marques, anneaux olympiques), pool de mauvaises réponses 7-10 avec
-  « dangers », pas de paris sportifs, pas de vie privée.
+- Appels à l'API Claude en HTTP direct depuis des Edge Functions Supabase. Opus pour la
+  rédaction des questions, Sonnet pour les tâches courtes. Batch API pour les traitements
+  différés. Structured Outputs sur `question-v2.schema.json` : la réponse du modèle est
+  validée contre le schéma avant insertion en base.
+- Un prompt existe en trois exemplaires tenus synchrones : le fichier Markdown, une constante
+  de repli dans l'Edge Function, et la ligne active de la table `prompt_templates` (une par
+  sport, publiée par une RPC admin). Toute modification incrémente la version et ajoute une
+  ligne au changelog en bas du fichier.
+- Placeholders remplis par l'Edge Function avant l'appel : `{{sport_slug}}`,
+  `{{difficulty}}`, `{{count}}`, `{{theme_directive}}` (thème imposé) et
+  `{{exclusion_block}}` (énoncés déjà en base sur le même thème, jusqu'à 120).
+- Les règles éditoriales sont dans le prompt : ton, répartition hommes / femmes, propriété
+  intellectuelle (marques, symboles olympiques), 7 à 10 mauvaises réponses dont 1 à 3
+  plausibles, exclusion des paris sportifs et de la vie privée.
 
-## `agents/` : le pipeline quotidien
+## `agents/`
 
-Huit sous-agents Claude Code (frontmatter `name` / `description` / `tools` / `model`),
-lancés par un skill d'orchestration tous les matins à 08h00 en mode headless.
+Huit sous-agents Claude Code (frontmatter `name`, `description`, `tools`, `model`). Un skill
+d'orchestration les lance tous les matins à 08h00 (launchd, mode headless).
 
 | Agent | Rôle |
 |---|---|
-| `moisson-<sport>` (×7) | balayer l'actu de la veille d'un sport, en parallèle, et rendre des **faits sourcés et pré-classés** (`evergreen` / `one_shot` / `incertain` / `rejet` / `case_vide`) en JSON strict, jamais une question rédigée |
-| `moisson-lecteur` | contre-vérifier un lot de questions rédigées : cohérence interne, bonne réponse confirmée par **deux sources indépendantes**, mauvaises réponses vraiment fausses, périssabilité, français. Verdict tri-état `approve` / `reject` / `unsure` avec confiance, checks et sources |
+| `moisson-<sport>` (×7) | relève l'actualité de la veille d'un sport et rend des faits sourcés, classés `evergreen` / `one_shot` / `incertain` / `rejet` / `case_vide`, en JSON. Ne rédige pas de question. |
+| `moisson-lecteur` | vérifie un lot de questions rédigées : cohérence énoncé / réponse / explication, bonne réponse confirmée par deux sources indépendantes, mauvaises réponses effectivement fausses, durée de validité, français. Verdict `approve` / `reject` / `unsure` avec confiance et sources. |
 
-Ce que ces fichiers montrent :
+Fonctionnement :
 
-- **Un agent = un contrat**. Entrées nommées (`date_veille`, `fenetre_app`, `budget`,
-  `deja_traites`), sortie JSON stricte, règles de datation non négociables.
-- **Budget dur de recherches** (14 par agent de veille, 20 par lot de lecture), compté à voix
-  haute. Dépasser n'est pas du zèle, c'est un bug ; et un plancher : jamais zéro recherche,
-  « ta mémoire n'est pas une source ».
-- **Indépendance des lecteurs** : deux instances par lot, aucune ne voit le tag de durabilité
-  ni le verdict de l'autre. Un désaccord vaut `unsure`.
-- **Principe du doute** : seule la certitude agit. `unsure` n'est jamais appliqué, une
-  erreur réparable donne `unsure` + correction, jamais `reject`. L'activation automatique
-  exige deux `approve`, une confiance ≥ 0,80 et au moins deux sources ; tout le reste
-  attend la revue humaine.
+- Entrées nommées dans le message de lancement (`date_veille`, `fenetre_app`, `budget`,
+  `deja_traites`), sortie JSON au format fixé dans le fichier.
+- Plafond de recherches web par agent : 14 pour la veille, 20 par lot de lecture. Minimum une
+  recherche : la mémoire du modèle n'est pas acceptée comme source.
+- Deux lecteurs par lot, lancés séparément ; aucun ne reçoit le classement de durabilité ni le
+  verdict de l'autre. Un désaccord donne `unsure`.
+- Un `unsure` n'est jamais appliqué automatiquement. Une erreur corrigeable donne `unsure` +
+  correction, pas `reject`. L'activation automatique demande deux `approve`, une confiance
+  ≥ 0,80 et deux sources ; le reste part en revue manuelle.
 
-Le pipeline complet, pour situer les agents :
+Chaîne complète :
 
 ```
 7 agents moisson-<sport> en parallèle
-  → tri (grille éditoriale)
-  → génération ancrée sur les faits sourcés (Claude, Structured Outputs)
-  → dédoublonnage par embeddings (pgvector)
+  → tri selon la grille éditoriale
+  → rédaction des questions à partir des faits sourcés (Claude, Structured Outputs)
+  → détection des doublons par embeddings (pgvector)
   → insertion en file de revue
   → 2 lecteurs indépendants par lot
-  → activation automatique au-dessus du seuil, le reste à la revue humaine
+  → activation automatique au-dessus du seuil, revue manuelle pour le reste
   → composition de la grille du Daily
-  → contrôle final par le chemin du joueur
+  → contrôle final en conditions joueur
 ```
-
-## Ce que ça nous a appris
-
-- Un exemple pèse plus qu'une consigne.
-- N'injecter que le contexte utile ; le reste coûte et dilue.
-- Les budgets sont des plafonds durs, sinon les agents les dépassent pour prouver du vide.
-- Un verdict en trois états, avec le doute qui remonte à l'humain, vaut mieux qu'un oui/non.
-- Le prompt est du code : versionné, changelog, une seule version active, repli en cas de
-  panne.
 
 ## Périmètre
 
-Extraits sélectionnés et relus avant publication : aucune clé, aucun identifiant de projet,
-aucune donnée joueur. Voir `NOTICE.md`.
+Extraits relus avant publication : aucune clé, aucun identifiant de projet, aucune donnée
+joueur. Voir `NOTICE.md`.
